@@ -19,11 +19,10 @@
 
 package org.apache.jackrabbit.oak.plugins.index.lucene.dynamicBoost;
 
-import static org.junit.Assert.assertEquals;
-
 import java.io.ByteArrayInputStream;
 import java.io.InputStream;
 import java.util.ArrayList;
+import java.util.Arrays;
 
 import org.apache.jackrabbit.JcrConstants;
 import org.apache.jackrabbit.oak.Oak;
@@ -53,6 +52,7 @@ import org.apache.jackrabbit.oak.spi.security.OpenSecurityProvider;
 import org.junit.Test;
 
 import ch.qos.logback.classic.Level;
+import static org.junit.Assert.assertEquals;
 
 /**
  * Tests the index augmentation feature.
@@ -127,6 +127,36 @@ public class DynamicBoostTest extends AbstractQueryTest {
                         "name is an array: jcr:content/metadata/predictedTags, " +
                         "name is an array: jcr:content/metadata/predictedTags" +
                         "]", log);
+    }
+
+    @Test
+    public void testQueryDynamicBoost() throws Exception {
+        NodeTypeRegistry.register(root, toInputStream(ASSET_NODE_TYPE), "test nodeType");
+        Tree props = createIndex("dam:Asset");
+        Tree pt = createNodeWithType(props, "predictedTags", UNSTRUCTURED);
+        pt.setProperty("name", "jcr:content/metadata/predictedTags/.*");
+        pt.setProperty("isRegexp", true);
+        pt.setProperty("dynamicBoost", true);
+        pt.setProperty("propertyIndex", true);
+        pt.setProperty("nodeScopeIndex", true);
+        root.commit();
+
+        Tree test = createNodeWithType(root.getTree("/"), "test", UNSTRUCTURED);
+        Tree node = createNodeWithType(test, "item1", "dam:Asset");
+        Tree predicted =
+                createNodeWithType(
+                        createNodeWithType(
+                                createNodeWithType(node, JcrConstants.JCR_CONTENT, UNSTRUCTURED),
+                                "metadata", UNSTRUCTURED),
+                        "predictedTags", UNSTRUCTURED);
+        Tree t = createNodeWithType(predicted, "red", UNSTRUCTURED);
+        t.setProperty("name", "red");
+        t.setProperty("confidence", 10.0);
+        root.commit();
+
+        Thread.sleep(3000);
+
+        assertQuery("//element(*, dam:Asset)[jcr:contains(., 'red')]", XPATH, Arrays.asList("/test/item1"));
     }
 
     @Test public void withDynamicBoostLite() throws Exception {
