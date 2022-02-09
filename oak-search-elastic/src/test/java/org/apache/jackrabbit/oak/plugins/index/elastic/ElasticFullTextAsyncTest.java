@@ -16,6 +16,11 @@
  */
 package org.apache.jackrabbit.oak.plugins.index.elastic;
 
+import java.util.Arrays;
+import java.util.Collections;
+import java.util.UUID;
+
+import org.apache.jackrabbit.oak.api.CommitFailedException;
 import org.apache.jackrabbit.oak.api.PropertyState;
 import org.apache.jackrabbit.oak.api.Tree;
 import org.apache.jackrabbit.oak.api.Type;
@@ -25,10 +30,6 @@ import org.apache.jackrabbit.oak.plugins.index.search.util.IndexDefinitionBuilde
 import org.apache.jackrabbit.oak.spi.state.NodeState;
 import org.apache.jackrabbit.oak.spi.state.NodeStateUtils;
 import org.junit.Test;
-
-import java.util.Arrays;
-import java.util.Collections;
-import java.util.UUID;
 
 import static org.apache.jackrabbit.oak.plugins.index.IndexConstants.INDEX_DEFINITIONS_NAME;
 import static org.apache.jackrabbit.oak.plugins.index.search.IndexDefinition.INDEX_DEFINITION_NODE;
@@ -215,18 +216,14 @@ public class ElasticFullTextAsyncTest extends ElasticAbstractQueryTest {
         test.addChild("b").setProperty("analyzed_field", "test456");
         root.commit();
 
-        assertEventually(() ->
-                assertQuery("//*[jcr:contains(@analyzed_field, 'test123')] ", XPATH, Collections.singletonList("/test/a"))
-        );
+        assertEventually(() -> assertQuery("//*[jcr:contains(@analyzed_field, 'test123')] ", XPATH, Collections.singletonList("/test/a")));
     }
 
     @Test
     public void defaultAnalyzer() throws Exception {
         IndexDefinitionBuilder builder = createIndex("analyzed_field");
         builder.async("async");
-        builder.indexRule("nt:base")
-                .property("analyzed_field")
-                .analyzed().nodeScopeIndex();
+        builder.indexRule("nt:base").property("analyzed_field").analyzed().nodeScopeIndex();
 
         setIndex(UUID.randomUUID().toString(), builder);
         root.commit();
@@ -251,9 +248,7 @@ public class ElasticFullTextAsyncTest extends ElasticAbstractQueryTest {
     public void fulltextWithModifiedNodeScopeIndex() throws Exception {
         IndexDefinitionBuilder builder = createIndex("analyzed_field");
         builder.async("async");
-        builder.indexRule("nt:base")
-                .property("analyzed_field")
-                .analyzed();
+        builder.indexRule("nt:base").property("analyzed_field").analyzed();
 
         Tree index = setIndex(UUID.randomUUID().toString(), builder);
         root.commit();
@@ -264,16 +259,72 @@ public class ElasticFullTextAsyncTest extends ElasticAbstractQueryTest {
         test.addChild("a").setProperty("analyzed_field", "sun.jpg");
         root.commit();
 
-        assertEventually(() ->
-                assertQuery("//*[jcr:contains(@analyzed_field, 'SUN.JPG')] ", XPATH, Collections.singletonList("/test/a")));
+        assertEventually(() -> assertQuery("//*[jcr:contains(@analyzed_field, 'SUN.JPG')] ", XPATH, Collections.singletonList("/test/a")));
 
         // add nodeScopeIndex at a later stage
-        index.getChild("indexRules").getChild("nt:base").getChild("properties")
-                .getChild("analyzed_field").setProperty(FulltextIndexConstants.PROP_NODE_SCOPE_INDEX, true);
+        index.getChild("indexRules")
+                .getChild("nt:base")
+                .getChild("properties")
+                .getChild("analyzed_field")
+                .setProperty(FulltextIndexConstants.PROP_NODE_SCOPE_INDEX, true);
         root.commit();
 
-        assertEventually(() ->
-                assertQuery("//*[jcr:contains(., 'jpg')] ", XPATH, Collections.singletonList("/test/a")));
+        assertEventually(() -> assertQuery("//*[jcr:contains(., 'jpg')] ", XPATH, Collections.singletonList("/test/a")));
     }
 
+    @Test
+    public void wildcardQuery() throws CommitFailedException {
+        createNodeScopeIndexWith2Properties();
+        prepareTestContent();
+
+        assertEventually(() -> {
+            assertQuery("//*[jcr:contains(., 'Hell*')] ", XPATH, Arrays.asList("/test/nodea", "/test/nodeb", "/test/nodec"));
+            assertQuery("//*[jcr:contains(., '?orld')] ", XPATH, Arrays.asList("/test/nodeb", "/test/nodec"));
+        });
+    }
+
+    @Test
+    public void excludeQuery() throws CommitFailedException {
+        createNodeScopeIndexWith2Properties();
+        prepareTestContent();
+
+        assertEventually(() -> {
+            assertQuery("//*[jcr:contains(., 'hello -world')] ", XPATH, Arrays.asList("/test/nodea"));
+        });
+    }
+
+    @Test
+    public void explicitOrQuery() throws CommitFailedException {
+        createNodeScopeIndexWith2Properties();
+        prepareTestContent();
+
+        assertEventually(() -> {
+            assertQuery("//*[jcr:contains(., 'ocean OR world')] ", XPATH, Arrays.asList("/test/nodea", "/test/nodeb", "/test/nodec"));
+        });
+    }
+
+    private void createNodeScopeIndexWith2Properties() throws CommitFailedException {
+        IndexDefinitionBuilder builder = createIndex("a", "b").async("async");
+        builder.indexRule("nt:base").property("a").nodeScopeIndex();
+        builder.indexRule("nt:base").property("b").nodeScopeIndex();
+
+        setIndex(UUID.randomUUID().toString(), builder);
+        root.commit();
+    }
+
+    private void prepareTestContent() throws CommitFailedException {
+        Tree test = root.getTree("/").addChild("test");
+
+        Tree testNodeA = test.addChild("nodea");
+        testNodeA.setProperty("a", "hello");
+        testNodeA.setProperty("b", "ocean");
+
+        Tree testNodeB = test.addChild("nodeb");
+        testNodeB.setProperty("a", "hello world");
+
+        Tree testNodeC = test.addChild("nodec");
+        testNodeC.setProperty("a", "hello");
+        testNodeC.setProperty("b", "world");
+        root.commit();
+    }
 }
