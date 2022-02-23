@@ -132,6 +132,7 @@ class ElasticSpellcheckIterator implements Iterator<FulltextResultRow> {
         final SearchRequest searchRequest = new SearchRequest(indexNode.getDefinition().getIndexAlias())
                 .source(searchSourceBuilder);
 
+        LOG.trace("kickoff spellcheck query: {}", searchSourceBuilder);
         SearchResponse searchResponse = indexNode.getConnection().getClient().search(searchRequest, RequestOptions.DEFAULT);
 
         return StreamSupport

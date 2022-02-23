@@ -52,7 +52,7 @@ public final class ElasticTestUtils {
                     throw new AssertionError(msg, e);
                 }
                 try {
-                    Thread.sleep(100);
+                    Thread.sleep(3000);
                 } catch (InterruptedException ex) {
                     ex.printStackTrace();
                 }

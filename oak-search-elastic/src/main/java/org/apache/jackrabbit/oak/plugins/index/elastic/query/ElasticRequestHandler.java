@@ -206,6 +206,12 @@ public class ElasticRequestHandler {
                         );
                     }
                 }
+            } else if (propertyRestrictionQuery.startsWith(SUGGEST_PREFIX)) {
+                String suggestQueryString = propertyRestrictionQuery.replace(SUGGEST_PREFIX, "");
+                boolQuery.must(suggestionMatchQuery(suggestQueryString));
+            } else if (propertyRestrictionQuery.startsWith(SPELLCHECK_PREFIX)) {
+                String spellcheckQueryString = propertyRestrictionQuery.replace(SPELLCHECK_PREFIX, "");
+                boolQuery.must(suggestMatchQuery(spellcheckQueryString));
             } else {
                 boolQuery.must(queryStringQuery(propertyRestrictionQuery));
             }

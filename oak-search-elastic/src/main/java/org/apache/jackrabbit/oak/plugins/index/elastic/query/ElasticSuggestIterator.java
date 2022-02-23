@@ -86,6 +86,7 @@ class ElasticSuggestIterator implements Iterator<FulltextResultRow> {
                 .fetchSource(FieldNames.PATH, null);
         SearchRequest searchRequest = new SearchRequest(indexNode.getDefinition().getIndexAlias())
                 .source(searchSourceBuilder);
+        LOG.trace("kickoff suggestions query: {}", searchSourceBuilder);
         SearchResponse res = indexNode.getConnection().getClient().search(searchRequest, RequestOptions.DEFAULT);
         PriorityQueue<ElasticSuggestion> suggestionPriorityQueue = new PriorityQueue<>((a, b) -> Double.compare(b.score, a.score));
         for (SearchHit doc : res.getHits()) {
