@@ -154,6 +154,7 @@ public class FulltextBinaryTextExtractor {
     try {
       CountingInputStream stream = new CountingInputStream(new LazyInputStream(() -> v.getNewStream()));
       try {
+        long startParse = System.currentTimeMillis();
         if (length > SMALL_BINARY) {
           String name = "Extracting " + path + ", " + length + " bytes";
           extractedTextCache.process(name, new Callable<Void>() {
@@ -163,8 +164,10 @@ public class FulltextBinaryTextExtractor {
               return null;
             }
           });
+          log.info("Extract big blob done, path '{}', size: {}, took {} ms", path, length, System.currentTimeMillis() - startParse);
         } else {
           getParser().parse(stream, handler, metadata, new ParseContext());
+          log.info("Extract blob done, path '{}', size: {}, took {} ms", path, length, System.currentTimeMillis() - startParse);
         }
       } finally {
         bytesRead = stream.getCount();
@@ -175,7 +178,7 @@ public class FulltextBinaryTextExtractor {
       // not being present. This is equivalent to disabling
       // selected media types in configuration, so we can simply
       // ignore these errors.
-      log.debug(
+      log.info(
           "[{}] Failed to extract text from a binary property: {}."
               + " This often happens when some media types are disabled by configuration."
               + " The stack trace is included to flag some 'unintended' failures",
@@ -193,7 +196,7 @@ public class FulltextBinaryTextExtractor {
       // Capture and report any other full text extraction problems.
       // The special STOP exception is used for normal termination.
       if (!handler.isWriteLimitReached(t)) {
-        log.debug(
+        log.info(
             "[{}] Failed to extract text from a binary property: {}."
                 + " This is a fairly common case, and nothing to"
                 + " worry about. The stack trace is included to"
@@ -202,7 +205,7 @@ public class FulltextBinaryTextExtractor {
         extractedTextCache.put(v, ExtractedText.ERROR);
         return TEXT_EXTRACTION_ERROR;
       } else {
-        log.debug("Extracted text size exceeded configured limit({})", definition.getMaxExtractLength());
+        log.info("Extracted text size exceeded configured limit({})", definition.getMaxExtractLength());
       }
     }
     String result = handler.toString();
