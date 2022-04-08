@@ -37,8 +37,8 @@
         Size History:
         105 MB : Seeting constraint to default oak-run jar post adding the build plugin to rename the fat jar with embedded dependencies as the default jar.
         -->
-        <max.jar.size>105000000</max.jar.size>
-                      
+        <max.jar.size>205000000</max.jar.size>
+
     </properties>
 
     <build>
@@ -64,53 +64,31 @@
             </plugin>
             <plugin>
                 <groupId>org.apache.maven.plugins</groupId>
-                <artifactId>maven-assembly-plugin</artifactId>
-                <configuration>
-                    <archive>
-                        <manifest>
-                            <addDefaultImplementationEntries>true</addDefaultImplementationEntries>
-                            <addDefaultSpecificationEntries>true</addDefaultSpecificationEntries>
-                            <mainClass>org.apache.jackrabbit.oak.run.Main</mainClass>
-                        </manifest>
-                    </archive>
-                </configuration>
-                <executions>
-                    <execution>
-                        <id>create-oak</id>
-                        <phase>package</phase>
-                        <goals>
-                            <goal>single</goal>
-                        </goals>
-                        <configuration>
-                            <attach>false</attach>
-                            <descriptors>
-                                <descriptor>src/main/assembly/oak-run-elastic.xml</descriptor>
-                            </descriptors>
-                        </configuration>
-                    </execution>
-                </executions>
-            </plugin>
-            <plugin>
-                <groupId>org.apache.maven.plugins</groupId>
-                <artifactId>maven-antrun-plugin</artifactId>
-                <version>1.8</version>
+                <artifactId>maven-shade-plugin</artifactId>
                 <executions>
                     <execution>
                         <phase>package</phase>
-                        <configuration>
-                            <target>
-                                <!--
-                                Replace the default oak-run with the one created in assembly so
-                                as to ensure default artifact oak-run is the one which has all jars
-                                embedded
-                                -->
-                                <copy file="${project.build.directory}/${project.build.finalName}-oak.jar" tofile="${project.build.directory}/${project.build.finalName}.jar" />
-                                <delete file="${project.build.directory}/${project.build.finalName}-oak.jar" />
-                            </target>
-                        </configuration>
                         <goals>
-                            <goal>run</goal>
+                            <goal>shade</goal>
                         </goals>
+                        <configuration>
+                            <transformers>
+                                <transformer implementation="org.apache.maven.plugins.shade.resource.ManifestResourceTransformer">
+                                    <mainClass>org.apache.jackrabbit.oak.run.Main</mainClass>
+                                </transformer>
+                            </transformers>
+                            <filters>
+                                <filter>
+                                    <artifact>*</artifact>
+                                    <excludes>
+                                        <exclude>META-INF/*.SF</exclude>
+                                        <exclude>META-INF/*.DSA</exclude>
+                                        <exclude>META-INF/*.RSA</exclude>
+                                    </excludes>
+                                </filter>
+                            </filters>
+                            <createDependencyReducedPom>false</createDependencyReducedPom>
+                        </configuration>
                     </execution>
                 </executions>
             </plugin>

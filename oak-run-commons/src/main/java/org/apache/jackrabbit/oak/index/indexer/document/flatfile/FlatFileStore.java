@@ -25,15 +25,20 @@ import java.io.IOException;
 import java.util.Iterator;
 import java.util.Set;
 
-import com.google.common.collect.AbstractIterator;
-import com.google.common.io.Closer;
 import org.apache.commons.io.LineIterator;
 import org.apache.jackrabbit.oak.index.indexer.document.NodeStateEntry;
 import org.apache.jackrabbit.oak.spi.blob.BlobStore;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+
+import com.google.common.collect.AbstractIterator;
+import com.google.common.io.Closer;
 
 import static org.apache.jackrabbit.oak.index.indexer.document.flatfile.FlatFileStoreUtils.createReader;
 
 public class FlatFileStore implements Iterable<NodeStateEntry>, Closeable{
+    private final Logger log = LoggerFactory.getLogger(getClass());
+
     private final Closer closer = Closer.create();
     private final BlobStore blobStore;
     private final File storeFile;
@@ -50,6 +55,7 @@ public class FlatFileStore implements Iterable<NodeStateEntry>, Closeable{
                     storeFile.getAbsolutePath());
             throw new IllegalArgumentException(msg);
         }
+        log.info("=====storeFile: {}", storeFile.getPath());
         this.entryReader = entryReader;
         this.preferredPathElements = preferredPathElements;
         this.compressionEnabled = compressionEnabled;
@@ -69,8 +75,10 @@ public class FlatFileStore implements Iterable<NodeStateEntry>, Closeable{
 
     @Override
     public Iterator<NodeStateEntry> iterator() {
-        String fileName = new File(storeFile.getParent(), "linkedList").getAbsolutePath();
-        FlatFileStoreIterator it = new FlatFileStoreIterator(blobStore, fileName, createBaseIterator(), preferredPathElements);
+        String linkedFileName = "linkedList" + storeFile.getName().substring(storeFile.getName().lastIndexOf("-"));
+        String linkedListFilePath = new File(storeFile.getParent(), linkedFileName).getAbsolutePath();
+        log.info("========== linkedList fileName: {}", linkedListFilePath);
+        FlatFileStoreIterator it = new FlatFileStoreIterator(blobStore, linkedListFilePath, createBaseIterator(), preferredPathElements);
         closer.register(it::close);
         return it;
     }

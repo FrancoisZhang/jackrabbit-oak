@@ -26,12 +26,14 @@ import java.util.ArrayList;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Set;
+import java.util.concurrent.Callable;
+import java.util.concurrent.ExecutionException;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.Future;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.function.Predicate;
 
-import com.codahale.metrics.MetricRegistry;
-import com.google.common.base.Stopwatch;
-import com.google.common.io.Closer;
 import org.apache.jackrabbit.oak.api.CommitFailedException;
 import org.apache.jackrabbit.oak.index.IndexHelper;
 import org.apache.jackrabbit.oak.index.IndexerSupport;
@@ -65,6 +67,10 @@ import org.apache.jackrabbit.oak.spi.state.NodeStore;
 import org.apache.jackrabbit.oak.stats.StatisticsProvider;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+
+import com.codahale.metrics.MetricRegistry;
+import com.google.common.base.Stopwatch;
+import com.google.common.io.Closer;
 
 import static com.google.common.base.Preconditions.checkNotNull;
 import static org.apache.jackrabbit.oak.index.indexer.document.flatfile.FlatFileNodeStoreBuilder.OAK_INDEXER_SORTED_FILE_PATH;
@@ -145,17 +151,13 @@ public abstract class DocumentStoreIndexerBase implements Closeable{
         }
     }
 
-    private FlatFileStore buildFlatFileStore(NodeState checkpointedState, CompositeIndexer indexer) throws IOException {
-        return buildFlatFileStore(checkpointedState, indexer, null, null);
-    }
-
-    private FlatFileStore buildFlatFileStore(NodeState checkpointedState, CompositeIndexer indexer, Predicate<String> pathPredicate, Set<String> preferredPathElements) throws IOException {
+    private List<FlatFileStore> buildFlatFileStore(NodeState checkpointedState, CompositeIndexer indexer, Predicate<String> pathPredicate, Set<String> preferredPathElements) throws IOException {
+        List<FlatFileStore> storeList = new ArrayList<>();
 
         Stopwatch flatFileStoreWatch = Stopwatch.createStarted();
         int executionCount = 1;
         CompositeException lastException = null;
         List<File> previousDownloadDirs = new ArrayList<>();
-        FlatFileStore flatFileStore = null;
         //TODO How to ensure we can safely read from secondary
         DocumentNodeState rootDocumentState = (DocumentNodeState) checkpointedState;
         DocumentNodeStore nodeStore = (DocumentNodeStore) indexHelper.getNodeStore();
@@ -165,7 +167,7 @@ public abstract class DocumentStoreIndexerBase implements Closeable{
         FlatFileNodeStoreBuilder builder = null;
         int backOffTimeInMillis = 5000;
         MemoryManager memoryManager = new DefaultMemoryManager();
-        while (flatFileStore == null && executionCount <= MAX_DOWNLOAD_ATTEMPTS) {
+        while (storeList.isEmpty() && executionCount <= MAX_DOWNLOAD_ATTEMPTS) {
             try {
                 builder = new FlatFileNodeStoreBuilder(indexHelper.getWorkDir(), memoryManager)
                         .withLastModifiedBreakPoints(lastModifiedBreakPoints)
@@ -177,8 +179,10 @@ public abstract class DocumentStoreIndexerBase implements Closeable{
                 for (File dir : previousDownloadDirs) {
                     builder.addExistingDataDumpDir(dir);
                 }
-                flatFileStore = builder.build();
-                closer.register(flatFileStore);
+                storeList = builder.buildList();
+                for (FlatFileStore item: storeList) {
+                    closer.register(item);
+                }
             } catch (CompositeException e) {
                 e.logAllExceptions("Underlying throwable caught during download", log);
                 log.info("Could not build flat file store. Execution count {}. Retries left {}. Time elapsed {}",
@@ -197,11 +201,11 @@ public abstract class DocumentStoreIndexerBase implements Closeable{
             }
             executionCount++;
         }
-        if (flatFileStore == null) {
+        if (storeList.isEmpty()) {
             throw new IOException("Could not build flat file store", lastException);
         }
         log.info("Completed the flat file store build in {}", flatFileStoreWatch);
-        return flatFileStore;
+        return storeList;
     }
 
     /**
@@ -228,10 +232,10 @@ public abstract class DocumentStoreIndexerBase implements Closeable{
             indexDefinitions.add(indexDf);
         }
         Predicate<String> predicate = s -> indexDefinitions.stream().anyMatch(indexDef -> indexDef.getPathFilter().filter(s) != PathFilter.Result.EXCLUDE);
-        FlatFileStore flatFileStore = buildFlatFileStore(checkpointedState, null, predicate, preferredPathElements);
+        List<FlatFileStore> storeList = buildFlatFileStore(checkpointedState, null, predicate, preferredPathElements);
         log.info("FlatFileStore built at {}. To use this flatFileStore in a reindex step, set System Property-{} with value {}",
-                flatFileStore.getFlatFileStorePath(), OAK_INDEXER_SORTED_FILE_PATH, flatFileStore.getFlatFileStorePath());
-        return flatFileStore;
+                storeList.get(0).getFlatFileStorePath(), OAK_INDEXER_SORTED_FILE_PATH, storeList.get(0).getFlatFileStorePath());
+        return storeList.get(0);
     }
 
     public void reindex() throws CommitFailedException, IOException {
@@ -251,12 +255,14 @@ public abstract class DocumentStoreIndexerBase implements Closeable{
 
         closer.register(indexer);
 
-        FlatFileStore flatFileStore = buildFlatFileStore(checkpointedState, indexer);
+        List<FlatFileStore> storeList  = buildFlatFileStore(checkpointedState, indexer, null, null);
 
         progressReporter.reset();
-        if (flatFileStore.getEntryCount() > 0){
-            FlatFileStore finalFlatFileStore = flatFileStore;
-            progressReporter.setNodeCountEstimator((String basePath, Set<String> indexPaths) -> finalFlatFileStore.getEntryCount());
+        for (FlatFileStore flatFileStore : storeList) {
+            if (flatFileStore.getEntryCount() > 0){
+                FlatFileStore finalFlatFileStore = flatFileStore;
+                progressReporter.setNodeCountEstimator((String basePath, Set<String> indexPaths) -> finalFlatFileStore.getEntryCount());
+            }
         }
 
         progressReporter.reindexingTraversalStart("/");
@@ -264,10 +270,12 @@ public abstract class DocumentStoreIndexerBase implements Closeable{
         preIndexOpertaions(indexer.getIndexers());
 
         Stopwatch indexerWatch = Stopwatch.createStarted();
-        for (NodeStateEntry entry : flatFileStore) {
-            reportDocumentRead(entry.getPath(), progressReporter);
-            indexer.index(entry);
-        }
+//        for (NodeStateEntry entry : flatFileStore) {
+//            log.info("=====index job start running for {}", entry.getPath());
+//            reportDocumentRead(entry.getPath(), progressReporter);
+//            indexer.index(entry);
+//        }
+        indexParallel(storeList, indexer, progressReporter);
 
         progressReporter.reindexingTraversalEnd();
         progressReporter.logReport();
@@ -276,6 +284,36 @@ public abstract class DocumentStoreIndexerBase implements Closeable{
         copyOnWriteStore.merge(builder, EmptyHook.INSTANCE, CommitInfo.EMPTY);
 
         indexerSupport.postIndexWork(copyOnWriteStore);
+    }
+
+    private void indexParallel(List<FlatFileStore> storeList, CompositeIndexer indexer, IndexingProgressReporter progressReporter) {
+        ExecutorService service = Executors.newFixedThreadPool(8);
+        List<Future> futureList = new ArrayList<>();
+
+        for (FlatFileStore item : storeList) {
+            Future future = service.submit(new Callable<Boolean>() {
+                @Override
+                public Boolean call() throws IOException, CommitFailedException {
+                    log.info("============index job start running for flat file store: {}", item.getFlatFileStorePath());
+                    for (NodeStateEntry entry : item) {
+                        reportDocumentRead(entry.getPath(), progressReporter);
+                        indexer.index(entry);
+                    }
+                    return true;
+                }
+            });
+            futureList.add(future);
+        }
+
+        try {
+            for (Future future : futureList) {
+                future.get();
+            }
+            log.info("=====all indexing job are done");
+            service.shutdown();
+        } catch (InterruptedException | ExecutionException e) {
+            log.error("Failure getting indexing result", e);
+        }
     }
 
     private MongoDocumentStore getMongoDocumentStore() {

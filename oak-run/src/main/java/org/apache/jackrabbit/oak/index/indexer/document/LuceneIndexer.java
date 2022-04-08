@@ -21,6 +21,7 @@ package org.apache.jackrabbit.oak.index.indexer.document;
 
 import java.io.IOException;
 import java.util.Set;
+import java.util.concurrent.TimeUnit;
 
 import org.apache.jackrabbit.oak.api.CommitFailedException;
 import org.apache.jackrabbit.oak.plugins.document.NodeDocument;
@@ -35,8 +36,13 @@ import org.apache.jackrabbit.oak.spi.filter.PathFilter;
 import org.apache.jackrabbit.oak.spi.state.NodeBuilder;
 import org.apache.lucene.document.Document;
 import org.apache.lucene.facet.FacetsConfig;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+
+import com.google.common.base.Stopwatch;
 
 public class LuceneIndexer implements NodeStateIndexer, FacetsConfigProvider {
+    private final Logger log = LoggerFactory.getLogger(getClass());
     private final IndexDefinition definition;
     private final FulltextBinaryTextExtractor binaryTextExtractor;
     private final NodeBuilder definitionBuilder;
@@ -67,6 +73,8 @@ public class LuceneIndexer implements NodeStateIndexer, FacetsConfigProvider {
 
     @Override
     public boolean index(NodeStateEntry entry) throws IOException, CommitFailedException {
+        Stopwatch makeDocWatch = Stopwatch.createStarted();
+
         if (getFilterResult(entry.getPath()) != PathFilter.Result.INCLUDE) {
             return false;
         }
@@ -79,8 +87,14 @@ public class LuceneIndexer implements NodeStateIndexer, FacetsConfigProvider {
 
         LuceneDocumentMaker maker = newDocumentMaker(indexingRule, entry.getPath());
         Document doc = maker.makeDocument(entry.getNodeState());
+
+        log.info("make document '{}' took: {} micro seconds", entry.getPath(), makeDocWatch.elapsed(TimeUnit.MICROSECONDS));
+
         if (doc != null) {
+            Stopwatch writeIndexWatch = Stopwatch.createStarted();
             writeToIndex(doc, entry.getPath());
+            log.info("write index '{}' took: {} micro seconds", entry.getPath(), writeIndexWatch.elapsed(TimeUnit.MICROSECONDS));
+
             progressReporter.indexUpdate(definition.getIndexPath());
             return true;
         }
