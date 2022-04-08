@@ -19,16 +19,15 @@
 
 package org.apache.jackrabbit.oak.index.indexer.document.flatfile;
 
-import com.google.common.collect.Iterables;
-import org.apache.commons.io.FileUtils;
-import org.apache.jackrabbit.oak.index.indexer.document.CompositeException;
-import org.apache.jackrabbit.oak.index.indexer.document.NodeStateEntryTraverserFactory;
-import org.apache.jackrabbit.oak.spi.blob.BlobStore;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
+import static java.util.Collections.unmodifiableSet;
 
+import java.io.BufferedReader;
+import java.io.BufferedWriter;
 import java.io.File;
+import java.io.FileOutputStream;
+import java.io.FileReader;
 import java.io.IOException;
+import java.io.OutputStreamWriter;
 import java.nio.file.Files;
 import java.util.ArrayList;
 import java.util.Collections;
@@ -36,10 +35,16 @@ import java.util.List;
 import java.util.Set;
 import java.util.function.Predicate;
 
-import static java.util.Collections.unmodifiableSet;
+import org.apache.commons.io.FileUtils;
+import org.apache.jackrabbit.oak.index.indexer.document.CompositeException;
+import org.apache.jackrabbit.oak.index.indexer.document.NodeStateEntryTraverserFactory;
+import org.apache.jackrabbit.oak.spi.blob.BlobStore;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+
+import com.google.common.collect.Iterables;
 
 public class FlatFileNodeStoreBuilder {
-
     private static final String FLAT_FILE_STORE_DIR_NAME_PREFIX = "flat-fs-";
 
     public static final String OAK_INDEXER_USE_ZIP = "oak.indexer.useZip";
@@ -90,6 +95,7 @@ public class FlatFileNodeStoreBuilder {
     static final int OAK_INDEXER_MAX_SORT_MEMORY_IN_GB_DEFAULT = 2;
     static final String OAK_INDEXER_DUMP_THRESHOLD_IN_MB = "oak.indexer.dumpThresholdInMB";
     static final int OAK_INDEXER_DUMP_THRESHOLD_IN_MB_DEFAULT = 16;
+    private static final int FLAT_STORE_FILE_PART_NO = 4;
     private final Logger log = LoggerFactory.getLogger(getClass());
     private List<Long> lastModifiedBreakPoints;
     private final File workDir;
@@ -105,7 +111,7 @@ public class FlatFileNodeStoreBuilder {
     private long dumpThreshold = Integer.getInteger(OAK_INDEXER_DUMP_THRESHOLD_IN_MB, OAK_INDEXER_DUMP_THRESHOLD_IN_MB_DEFAULT) * FileUtils.ONE_MB;
     private Predicate<String> pathPredicate = path -> true;
 
-    private final boolean useZip = Boolean.parseBoolean(System.getProperty(OAK_INDEXER_USE_ZIP, "true"));
+    private final boolean useZip = Boolean.parseBoolean(System.getProperty(OAK_INDEXER_USE_ZIP, "false"));
     private final boolean useTraverseWithSort = Boolean.parseBoolean(System.getProperty(OAK_INDEXER_TRAVERSE_WITH_SORT, "true"));
     private final String sortStrategyTypeString = System.getProperty(OAK_INDEXER_SORT_STRATEGY_TYPE);
     private final SortStrategyType sortStrategyType = sortStrategyTypeString != null ? SortStrategyType.valueOf(sortStrategyTypeString) :
@@ -177,12 +183,74 @@ public class FlatFileNodeStoreBuilder {
         logFlags();
         comparator = new PathElementComparator(preferredPathElements);
         entryWriter = new NodeStateEntryWriter(blobStore);
+
         FlatFileStore store = new FlatFileStore(blobStore, createdSortedStoreFile(), new NodeStateEntryReader(blobStore),
                 unmodifiableSet(preferredPathElements), useZip);
         if (entryCount > 0) {
             store.setEntryCount(entryCount);
         }
         return store;
+    }
+
+    public List<FlatFileStore> buildList() throws IOException, CompositeException {
+        List<FlatFileStore> storeList = new ArrayList<>();
+        logFlags();
+        comparator = new PathElementComparator(preferredPathElements);
+        entryWriter = new NodeStateEntryWriter(blobStore);
+
+        File flatStoreFile = createdSortedStoreFile();
+
+        long start = System.currentTimeMillis();
+        List<File> fileList = splitStoreFile(flatStoreFile);
+        log.info("Split flat file to result files '{}' is done, took {} ms", fileList, System.currentTimeMillis() - start);
+
+        for (File flatFileItem : fileList) {
+            FlatFileStore store = new FlatFileStore(blobStore, flatFileItem, new NodeStateEntryReader(blobStore),
+                    unmodifiableSet(preferredPathElements), useZip);
+            storeList.add(store);
+        }
+        return storeList;
+    }
+
+    // todo: handle the useZip case
+    private List<File> splitStoreFile(File allInOneFile) {
+        long fileSize = allInOneFile.length();
+        long splitThreshold = Math.round((double) (fileSize / FLAT_STORE_FILE_PART_NO));
+
+        log.info("======= fileSize: " + fileSize);
+        log.info("======= splitThreshold: " + splitThreshold);
+
+        List<File> resultFiles = new ArrayList<>();
+
+        try (BufferedReader in = new BufferedReader(new FileReader(allInOneFile.getAbsolutePath()))) {
+            long readPos = 0;
+            int currentResultIndex = 0;
+
+            File currentFile = new File(allInOneFile.getAbsolutePath() + "-result-" + currentResultIndex);
+            resultFiles.add(currentFile);
+            BufferedWriter currentBufferedWriter = new BufferedWriter(new OutputStreamWriter(new FileOutputStream(currentFile)));
+
+            String line;
+            while ((line = in.readLine()) != null) {
+                if (readPos > splitThreshold && line.contains("\"nam:dam:Asset\"")) {
+                    log.info("======= {} Hit threshold and found starting line of an asset, write this new line to a new File", readPos);
+                    readPos = 0;
+                    currentBufferedWriter.close();
+                    currentResultIndex++;
+
+                    currentFile = new File(allInOneFile.getAbsolutePath() + "-result-" + currentResultIndex);
+                    resultFiles.add(currentFile);
+                    currentBufferedWriter = new BufferedWriter(new OutputStreamWriter(new FileOutputStream(currentFile)));
+                }
+                readPos += line.length() + 1;
+                currentBufferedWriter.write(line);
+                currentBufferedWriter.newLine();
+            }
+            currentBufferedWriter.close();
+        } catch (IOException e) {
+            log.error("Failed to split flat store file", e);
+        }
+        return resultFiles;
     }
 
     private File createdSortedStoreFile() throws IOException, CompositeException {
