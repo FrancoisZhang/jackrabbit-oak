@@ -152,6 +152,7 @@ class ElasticBulkProcessorHandler {
         return BulkProcessor.builder(requestConsumer(),
                 new OakBulkProcessorListener(), this.indexName + "-bulk-processor")
                 .setBulkActions(indexDefinition.bulkActions)
+                .setConcurrentRequests(4)
                 .setBulkSize(new ByteSizeValue(indexDefinition.bulkSizeBytes))
                 .setFlushInterval(TimeValue.timeValueMillis(indexDefinition.bulkFlushIntervalMs))
                 .setBackoffPolicy(BackoffPolicy.exponentialBackoff(
@@ -209,6 +210,8 @@ class ElasticBulkProcessorHandler {
 
             // init update status
             updatesMap.put(executionId, Boolean.FALSE);
+
+            bulkRequest.timeout(TimeValue.timeValueMinutes(2));
 
             LOG.debug("Sending bulk with id {} -> {}", executionId, bulkRequest.getDescription());
             if (LOG.isTraceEnabled()) {

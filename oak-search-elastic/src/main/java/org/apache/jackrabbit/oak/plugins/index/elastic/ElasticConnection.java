@@ -108,6 +108,9 @@ public class ElasticConnection implements Closeable {
                         Header[] headers = new Header[]{new BasicHeader("Authorization", "ApiKey " + apiKeyAuth)};
                         builder.setDefaultHeaders(headers);
                     }
+                    builder.setRequestConfigCallback(
+                            requestConfigBuilder -> requestConfigBuilder.setConnectTimeout(120000).setSocketTimeout(120000));
+
                     client = new RestHighLevelClient(builder);
                 }
             }
