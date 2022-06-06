@@ -17,13 +17,16 @@
 
 package org.apache.jackrabbit.oak.blob.cloud.s3;
 
+import static com.google.common.base.Preconditions.checkArgument;
+import static com.google.common.collect.Iterables.filter;
+import static java.lang.Thread.currentThread;
+
 import java.io.ByteArrayInputStream;
 import java.io.File;
 import java.io.IOException;
 import java.io.InputStream;
 import java.net.URI;
 import java.net.URISyntaxException;
-import java.net.URL;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.Collection;
@@ -68,7 +71,6 @@ import com.amazonaws.services.s3.model.CopyObjectRequest;
 import com.amazonaws.services.s3.model.CreateBucketRequest;
 import com.amazonaws.services.s3.model.DeleteObjectsRequest;
 import com.amazonaws.services.s3.model.DeleteObjectsResult;
-import com.amazonaws.services.s3.model.GeneratePresignedUrlRequest;
 import com.amazonaws.services.s3.model.GetBucketAccelerateConfigurationRequest;
 import com.amazonaws.services.s3.model.InitiateMultipartUploadRequest;
 import com.amazonaws.services.s3.model.InitiateMultipartUploadResult;
@@ -95,10 +97,6 @@ import com.google.common.cache.CacheBuilder;
 import com.google.common.collect.AbstractIterator;
 import com.google.common.collect.Lists;
 import com.google.common.collect.Maps;
-
-import static com.google.common.base.Preconditions.checkArgument;
-import static com.google.common.collect.Iterables.filter;
-import static java.lang.Thread.currentThread;
 
 /**
  * A data store backend that stores data on Amazon S3.
@@ -176,7 +174,7 @@ public class S3Backend extends AbstractSharedBackend {
                 }
             }
             String region = properties.getProperty(S3Constants.S3_REGION);
-            
+
             if (StringUtils.isNullOrEmpty(region)) {
                 com.amazonaws.regions.Region ec2Region = Regions.getCurrentRegion();
                 if (ec2Region != null) {
@@ -335,12 +333,12 @@ public class S3Backend extends AbstractSharedBackend {
                 long l = objectMetaData.getContentLength();
                 if (l != file.length()) {
                     throw new DataStoreException("Collision: " + key
-                        + " new length: " + file.length() + " old length: " + l);
+                            + " new length: " + file.length() + " old length: " + l);
                 }
                 LOG.debug("[{}]'s exists, lastmodified = [{}]", key,
-                    objectMetaData.getLastModified().getTime());
+                        objectMetaData.getLastModified().getTime());
                 CopyObjectRequest copReq = new CopyObjectRequest(bucket, key,
-                    bucket, key);
+                        bucket, key);
                 copReq.setNewObjectMetadata(objectMetaData);
                 Copy copy = tmx.copy(s3ReqDecorator.decorate(copReq));
                 try {
@@ -355,7 +353,7 @@ public class S3Backend extends AbstractSharedBackend {
                 try {
                     // start multipart parallel upload using amazon sdk
                     Upload up = tmx.upload(s3ReqDecorator.decorate(new PutObjectRequest(
-                        bucket, key, file)));
+                            bucket, key, file)));
                     if (LOG_STREAMS_UPLOAD.isDebugEnabled()) {
                         // Log message, with exception so we can get a trace to see where the call came from
                         LOG_STREAMS_UPLOAD.debug("Binary uploaded to S3 - identifier={}", key, new Exception());
@@ -1018,44 +1016,17 @@ public class S3Backend extends AbstractSharedBackend {
                                    int expirySeconds,
                                    Map<String, String> reqParams) {
         final String key = getKeyName(identifier);
-
         try {
-            final Date expiration = new Date();
-            expiration.setTime(expiration.getTime() + expirySeconds * 1000);
-
-            GeneratePresignedUrlRequest request = new GeneratePresignedUrlRequest(bucket, key)
-                    .withMethod(method)
-                    .withExpiration(expiration);
-
-            if (method != HttpMethod.GET) {
-               request = s3ReqDecorator.decorate(request);
-            }
-
-            for (Map.Entry<String, String> e : reqParams.entrySet()) {
-                request.addRequestParameter(e.getKey(), e.getValue());
-            }
-
-            URI uri = null;
-            URL presignedURL = null;
-            try {
-                presignedURL = s3PresignService.generatePresignedUrl(request);
-                uri = presignedURL.toURI();
-
-                LOG.debug("Presigned {} URI for key {}: {}", method.name(), key, uri.toString());
-            }
-            catch (URISyntaxException e) {
-                LOG.error("AWS request to create presigned S3 URI failed - could not convert '{}' to URI",
-                        (null != presignedURL ? presignedURL.toString() : "")
-                );
-            }
-
-            return uri;
-
+            String r2Worker = properties.getProperty("r2WorkerEndpoint");
+            return new URI("https://" + r2Worker + "/" + key);
         } catch (AmazonServiceException e) {
             LOG.error("AWS request to create presigned S3 {} URI failed. " +
                             "Key: {}, Error: {}, HTTP Code: {}, AWS Error Code: {}, Error Type: {}, Request ID: {}",
                     method.name(), key, e.getMessage(), e.getStatusCode(), e.getErrorCode(), e.getErrorType(), e.getRequestId());
 
+            return null;
+        } catch (URISyntaxException e) {
+            e.printStackTrace();
             return null;
         }
     }
