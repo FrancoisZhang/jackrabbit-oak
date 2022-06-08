@@ -33,6 +33,14 @@
   <version>1.43-SNAPSHOT</version>
   <packaging>pom</packaging>
 
+  <distributionManagement>
+    <snapshotRepository>
+      <id>artifactory-dev-snapshots</id>
+      <name>or1dra823.corp.adobe.com-snapshots</name>
+      <url>https://artifactory.corp.adobe.com/artifactory/maven-aem-snapshot-local</url>
+    </snapshotRepository>
+  </distributionManagement>
+
   <properties>
     <test.opts.memory>-Xmx512m</test.opts.memory>
     <test.opts>${test.opts.coverage} ${test.opts.memory} -XX:+HeapDumpOnOutOfMemoryError -Dupdate.limit=100 -Djava.awt.headless=true</test.opts>
@@ -71,14 +79,14 @@
     <pax-exam.version>4.13.1</pax-exam.version>
     <java.version>1.8</java.version>
     <java.version.signature>java18</java.version.signature>
-    
-   <!-- specifies on which fixture to run the integration testing tests. 
-      override in profiles or provide from command line to change behaviour. Provide 
-      more fixtures space separated. See org.apache.jackrabbit.oak.jcr.FixturesHelper#AVAILABLE_FIXTURES 
+
+   <!-- specifies on which fixture to run the integration testing tests.
+      override in profiles or provide from command line to change behaviour. Provide
+      more fixtures space separated. See org.apache.jackrabbit.oak.jcr.FixturesHelper#AVAILABLE_FIXTURES
       for the possible values: SEGMENT_MK SEGMENT_TAR SEGMENT_AWS SEGMENT_AZURE DOCUMENT_NS DOCUMENT_RDB -->
     <fixtures>SEGMENT_TAR</fixtures>
 
-   <!-- whether skip the surefire unit testing during the integration testing. 
+   <!-- whether skip the surefire unit testing during the integration testing.
       Override with -Dsurefire.skip.ut=true when needed -->
     <surefire.skip.ut>false</surefire.skip.ut>
   </properties>
@@ -344,13 +352,13 @@
           <artifactId>spotbugs-maven-plugin</artifactId>
           <version>3.1.11</version>
         </plugin>
-        
+
         <plugin>
           <groupId>org.codehaus.mojo</groupId>
           <artifactId>versions-maven-plugin</artifactId>
           <version>2.7</version>
         </plugin>
-        
+
         <!-- This plugin's configuration is used to store Eclipse m2e      -->
         <!-- settings only. It has no influence on the Maven build itself. -->
         <plugin>
@@ -948,7 +956,7 @@
          </dependency>
       </dependencies>
    </profile>
-   
+
     <!-- - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - other profiles -->
 
    <profile>
@@ -980,7 +988,7 @@
          </plugins>
       </build>
    </profile>
-    
+
    <profile>
       <id>guavabetachecks</id>
       <build>
